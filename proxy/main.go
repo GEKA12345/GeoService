@@ -28,8 +28,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/GEKA12345/GeoService/proxy/internal/controller"
-	"github.com/GEKA12345/GeoService/proxy/internal/responder"
+	"test/proxy/internal/controller"
+	"test/proxy/internal/responder"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/jwtauth/v5"
 	"github.com/ptflp/godecoder"

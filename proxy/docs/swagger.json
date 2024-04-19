@@ -1,0 +1,354 @@
+{
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "schemes": [
+    "http"
+  ],
+  "swagger": "2.0",
+  "info": {
+    "description": "# This is a Geo Service API\n\ninfo:",
+    "title": "GeoService",
+    "version": "0.0.1"
+  },
+  "host": "localhost:8080",
+  "paths": {
+    "/api/address/geocode": {
+      "post": {
+        "description": "Search for addresses by longitude and latitude",
+        "tags": [
+          "geoCode"
+        ],
+        "operationId": "postGeo",
+        "parameters": [
+          {
+            "name": "query",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/geocodeRequest"
+            }
+          },
+          {
+            "type": "string",
+            "example": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ",
+            "description": "Bearer token for user authentication",
+            "name": "Authorization",
+            "in": "header",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "geoCode results",
+            "schema": {
+              "$ref": "#/definitions/geocodeResponse"
+            }
+          },
+          "400": {
+            "description": "bad request",
+            "schema": {
+              "$ref": "#/definitions/errorResponse"
+            }
+          },
+          "403": {
+            "description": "forbidden",
+            "schema": {
+              "$ref": "#/definitions/errorResponse"
+            }
+          },
+          "500": {
+            "description": "internal server error",
+            "schema": {
+              "$ref": "#/definitions/errorResponse"
+            }
+          }
+        }
+      }
+    },
+    "/api/address/search": {
+      "post": {
+        "description": "Search for addresses by query string",
+        "tags": [
+          "search"
+        ],
+        "operationId": "postSearch",
+        "parameters": [
+          {
+            "name": "query",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/searchRequest"
+            }
+          },
+          {
+            "type": "string",
+            "example": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ",
+            "description": "Bearer token for user authentication",
+            "name": "Authorization",
+            "in": "header",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "search results",
+            "schema": {
+              "$ref": "#/definitions/searchResponse"
+            }
+          },
+          "400": {
+            "description": "bad request",
+            "schema": {
+              "$ref": "#/definitions/errorResponse"
+            }
+          },
+          "403": {
+            "description": "forbidden",
+            "schema": {
+              "$ref": "#/definitions/errorResponse"
+            }
+          },
+          "500": {
+            "description": "internal server error",
+            "schema": {
+              "$ref": "#/definitions/errorResponse"
+            }
+          }
+        }
+      }
+    },
+    "/api/login": {
+      "post": {
+        "description": "Login user",
+        "tags": [
+          "user"
+        ],
+        "operationId": "postLoginUser",
+        "parameters": [
+          {
+            "name": "userRequest",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/userRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successfully logged in",
+            "schema": {
+              "$ref": "#/definitions/tokenResponse"
+            }
+          },
+          "400": {
+            "description": "bad request",
+            "schema": {
+              "$ref": "#/definitions/errorResponse"
+            }
+          },
+          "404": {
+            "description": "user not found or wrong password",
+            "schema": {
+              "$ref": "#/definitions/errorResponse"
+            }
+          },
+          "500": {
+            "description": "internal server error",
+            "schema": {
+              "$ref": "#/definitions/errorResponse"
+            }
+          }
+        }
+      }
+    },
+    "/api/register": {
+      "post": {
+        "description": "Register user",
+        "tags": [
+          "user"
+        ],
+        "operationId": "postRegisterUser",
+        "parameters": [
+          {
+            "name": "userRequest",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/userRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successfully registered",
+            "schema": {
+              "$ref": "#/definitions/tokenResponse"
+            }
+          },
+          "400": {
+            "description": "bad request",
+            "schema": {
+              "$ref": "#/definitions/errorResponse"
+            }
+          },
+          "409": {
+            "description": "user already exists",
+            "schema": {
+              "$ref": "#/definitions/errorResponse"
+            }
+          },
+          "500": {
+            "description": "internal server error",
+            "schema": {
+              "$ref": "#/definitions/errorResponse"
+            }
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "Address": {
+      "type": "object",
+      "properties": {
+        "address": {
+          "type": "string",
+          "x-go-name": "Address"
+        },
+        "lat": {
+          "type": "number",
+          "format": "double",
+          "x-go-name": "Lat"
+        },
+        "lon": {
+          "type": "number",
+          "format": "double",
+          "x-go-name": "Lon"
+        }
+      },
+      "x-go-package": "test/proxy/internal/responder"
+    },
+    "errorResponse": {
+      "type": "object",
+      "required": [
+        "error"
+      ],
+      "properties": {
+        "error": {
+          "type": "string",
+          "x-go-name": "Message"
+        }
+      },
+      "x-go-name": "ErrorResponse",
+      "x-go-package": "test/proxy/internal/responder"
+    },
+    "geocodeRequest": {
+      "type": "object",
+      "required": [
+        "lat",
+        "lng"
+      ],
+      "properties": {
+        "lat": {
+          "description": "point latitude",
+          "type": "string",
+          "x-go-name": "Lat",
+          "example": "55.7522"
+        },
+        "lng": {
+          "description": "point longitude",
+          "type": "string",
+          "x-go-name": "Lng",
+          "example": "37.6156"
+        }
+      },
+      "x-go-name": "GeocodeRequest",
+      "x-go-package": "test/proxy/internal/controller"
+    },
+    "geocodeResponse": {
+      "type": "object",
+      "properties": {
+        "addresses": {
+          "description": "list of searched address",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Address"
+          },
+          "x-go-name": "Addresses"
+        }
+      },
+      "x-go-name": "GeocodeResponse",
+      "x-go-package": "test/proxy/internal/responder"
+    },
+    "searchRequest": {
+      "type": "object",
+      "required": [
+        "query"
+      ],
+      "properties": {
+        "query": {
+          "description": "searching address query",
+          "type": "string",
+          "minLength": 2,
+          "x-go-name": "Query",
+          "example": "Москва"
+        }
+      },
+      "x-go-name": "SearchRequest",
+      "x-go-package": "test/proxy/internal/controller"
+    },
+    "searchResponse": {
+      "type": "object",
+      "properties": {
+        "addresses": {
+          "description": "list of searched address",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Address"
+          },
+          "x-go-name": "Addresses"
+        }
+      },
+      "x-go-name": "SearchResponse",
+      "x-go-package": "test/proxy/internal/responder"
+    },
+    "tokenResponse": {
+      "type": "object",
+      "properties": {
+        "access_token": {
+          "description": "access token",
+          "type": "string",
+          "x-go-name": "AccessToken",
+          "example": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiYWRtaW4iOnRydWV9.TJVA95OrM7E2cBab30RMHrHDcEfxjoYZgeFONFh7HgQ"
+        }
+      },
+      "x-go-name": "TokenResponse",
+      "x-go-package": "test/proxy/internal/responder"
+    },
+    "userRequest": {
+      "type": "object",
+      "properties": {
+        "login": {
+          "description": "user login",
+          "type": "string",
+          "x-go-name": "Login",
+          "example": "user1"
+        },
+        "password": {
+          "description": "user password",
+          "type": "string",
+          "x-go-name": "Password",
+          "example": "qwerty"
+        }
+      },
+      "x-go-name": "UserRequest",
+      "x-go-package": "test/proxy/internal/controller"
+    }
+  }
+}

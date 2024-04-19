@@ -10,8 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/GEKA12345/GeoService/proxy/internal/controller"
-	"github.com/GEKA12345/GeoService/proxy/internal/responder"
+	"test/proxy/internal/controller"
+	"test/proxy/internal/responder"
+
 	"github.com/ptflp/godecoder"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"

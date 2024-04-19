@@ -13,7 +13,7 @@ services:
     networks:
         - mylocal
   app:
-    build: ./proxy
+    build: .
     container_name: proxy
     volumes:
       - "./hugo/content:/app/static"
