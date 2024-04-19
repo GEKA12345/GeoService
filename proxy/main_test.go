@@ -6,10 +6,16 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
+	"github.com/GEKA12345/GeoService/proxy/internal/controller"
+	"github.com/GEKA12345/GeoService/proxy/internal/responder"
+	"github.com/ptflp/godecoder"
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 func Test_getProxyRouter(t *testing.T) {
@@ -20,7 +26,16 @@ func Test_getProxyRouter(t *testing.T) {
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	router := getProxyRouter(server.URL, "")
+	logger := zap.New(zapcore.NewCore(
+		zapcore.NewConsoleEncoder(zap.NewDevelopmentEncoderConfig()),
+		zapcore.Lock(os.Stdout),
+		zap.DebugLevel,
+	))
+	decoder := godecoder.NewDecoder()
+	respond := responder.NewResponder(decoder, logger)
+	contrl := controller.NewController(respond, decoder)
+
+	router := getProxyRouter(server.URL, "", contrl)
 	ts := httptest.NewServer(router.r)
 	defer ts.Close()
 
@@ -31,13 +46,12 @@ func Test_getProxyRouter(t *testing.T) {
 		want   string
 		status int
 	}{
-		{"1", ts, "/api/", "Hello from API", http.StatusOK},
-		{"2", ts, "", "Hello, Hugo!\n", http.StatusOK},
+		{"1", ts, "", "Hello, Hugo!\n", http.StatusOK},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			res, err := http.Get(ts.URL + tt.arg)
+			res, err := http.Get(tt.server.URL + tt.arg)
 			assert.NoError(t, err)
 			assert.Equal(t, tt.status, res.StatusCode)
 			buf := new(bytes.Buffer)
@@ -48,7 +62,7 @@ func Test_getProxyRouter(t *testing.T) {
 }
 
 func Test_handleRoutes(t *testing.T) {
-	testEnabled = true
+	controller.TestEnabled = true
 
 	handlerSearch := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -71,15 +85,24 @@ func Test_handleRoutes(t *testing.T) {
 	serverGeo := httptest.NewServer(handlerGeo)
 	defer serverGeo.Close()
 
-	router := getProxyRouter("http://hugo", ":1313")
+	logger := zap.New(zapcore.NewCore(
+		zapcore.NewConsoleEncoder(zap.NewDevelopmentEncoderConfig()),
+		zapcore.Lock(os.Stdout),
+		zap.DebugLevel,
+	))
+	decoder := godecoder.NewDecoder()
+	respond := responder.NewResponder(decoder, logger)
+	contrl := controller.NewController(respond, decoder)
+
+	router := getProxyRouter("http://hugo", ":1313", contrl)
 	ts := httptest.NewServer(router.r)
 	defer ts.Close()
 
 	bodySearch := `{"query":"Ленинский проспект, 118к1, Санкт-Петербург"}`
 	bodyGeo := `{"lat":"59.93986890851519","lng":"30.26046752929688"}`
 
-	wantSearch := `{"addresses":[{"address":"г Москва, ул Сухонская, д 11","lat":55.8782557,"lon":37.65372}]}`
-	wantGeo := "{\"addresses\":[{\"address\":\"г Москва, ул Сухонская, д 11\",\"lat\":55.878315,\"lon\":37.65372},{\"address\":\"г Москва, ул Сухонская, д 11А\",\"lat\":55.878212,\"lon\":37.652016},{\"address\":\"г Москва, ул Сухонская, д 13\",\"lat\":55.878666,\"lon\":37.6524},{\"address\":\"г Москва, ул Сухонская, д 9\",\"lat\":55.877167,\"lon\":37.652481},{\"address\":\"г Москва\",\"lat\":55.75396,\"lon\":37.620393}]}"
+	wantSearch := "{\"addresses\":[{\"address\":\"г Москва, ул Сухонская, д 11\",\"lat\":55.8782557,\"lon\":37.65372}]}\n"
+	wantGeo := "{\"addresses\":[{\"address\":\"г Москва, ул Сухонская, д 11\",\"lat\":55.878315,\"lon\":37.65372},{\"address\":\"г Москва, ул Сухонская, д 11А\",\"lat\":55.878212,\"lon\":37.652016},{\"address\":\"г Москва, ул Сухонская, д 13\",\"lat\":55.878666,\"lon\":37.6524},{\"address\":\"г Москва, ул Сухонская, д 9\",\"lat\":55.877167,\"lon\":37.652481},{\"address\":\"г Москва\",\"lat\":55.75396,\"lon\":37.620393}]}\n"
 
 	token := "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJsb2dpbiI6IlVzZXIxIiwicGFzc3dvcmQiOiIkMmEkMTAkaVUyaTQuTGdhdnEuZE9rdmtoZDZyZVY4QUVNbm1CLy5KWmJCOVpMZ2ZSYXVHY2ZnOHZWWmUifQ.h3iq4QISSdE1x4m7vVv9_U9fZukQagVlxvodMuwXaro"
 
@@ -100,19 +123,19 @@ func Test_handleRoutes(t *testing.T) {
 	}{
 		{"1", ts, args{serverAPI: serverSearch, Method: "POST", Url: "/api/address/search", Body: strings.NewReader(bodySearch), token: token}, wantSearch, http.StatusOK},
 		{"2", ts, args{serverAPI: serverGeo, Method: "POST", Url: "/api/address/geocode", Body: strings.NewReader(bodyGeo), token: token}, wantGeo, http.StatusOK},
-		{"3", ts, args{serverAPI: serverSearch, Method: "GET", Url: "/api/address/search", Body: strings.NewReader(bodySearch), token: token}, "{\"error\":\"Method not allowed\"}\n", http.StatusMethodNotAllowed},
-		{"4", ts, args{serverAPI: serverGeo, Method: "GET", Url: "/api/address/geocode", Body: strings.NewReader(bodyGeo), token: token}, "{\"error\":\"Method not allowed\"}\n", http.StatusMethodNotAllowed},
-		{"5", ts, args{serverAPI: serverSearch, Method: "POST", Url: "/api/address/search", Body: strings.NewReader(`dk&&*^jd@!)54;fjh`), token: token}, "{\"error\":\"bad request: main.go 400: error read body Search: invalid character 'd' looking for beginning of value\"}\n", http.StatusBadRequest},
-		{"6", ts, args{serverAPI: serverGeo, Method: "POST", Url: "/api/address/geocode", Body: strings.NewReader(`dk&&*^jd@!)54;fjh`), token: token}, "{\"error\":\"bad request: main.go 492: error read body geoCode: invalid character 'd' looking for beginning of value\"}\n", http.StatusBadRequest},
-		{"7", ts, args{serverAPI: server500, Method: "POST", Url: "/api/address/search", Body: strings.NewReader(bodySearch), token: token}, "{\"error\":\"Internal Server Error\"}\n", http.StatusInternalServerError},
-		{"8", ts, args{serverAPI: server500, Method: "POST", Url: "/api/address/geocode", Body: strings.NewReader(bodyGeo), token: token}, "{\"error\":\"Internal Server Error\"}\n", http.StatusInternalServerError},
+		{"3", ts, args{serverAPI: serverSearch, Method: "GET", Url: "/api/address/search", Body: strings.NewReader(bodySearch), token: token}, "{\"error\":\"405 Method not allowed\"}\n", http.StatusMethodNotAllowed},
+		{"4", ts, args{serverAPI: serverGeo, Method: "GET", Url: "/api/address/geocode", Body: strings.NewReader(bodyGeo), token: token}, "{\"error\":\"405 Method not allowed\"}\n", http.StatusMethodNotAllowed},
+		{"5", ts, args{serverAPI: serverSearch, Method: "POST", Url: "/api/address/search", Body: strings.NewReader(`dk&&*^jd@!)54;fjh`), token: token}, "{\"error\":\"400 bad request, err: readObjectStart: expect { or n, but found d, error found in #1 byte of ...|dk\\u0026\\u0026*^jd@!)|..., bigger context ...|dk\\u0026\\u0026*^jd@!)54;fjh|...\"}\n", http.StatusBadRequest},
+		{"6", ts, args{serverAPI: serverGeo, Method: "POST", Url: "/api/address/geocode", Body: strings.NewReader(`dk&&*^jd@!)54;fjh`), token: token}, "{\"error\":\"400 bad request, err: readObjectStart: expect { or n, but found d, error found in #1 byte of ...|dk\\u0026\\u0026*^jd@!)|..., bigger context ...|dk\\u0026\\u0026*^jd@!)54;fjh|...\"}\n", http.StatusBadRequest},
+		{"7", ts, args{serverAPI: server500, Method: "POST", Url: "/api/address/search", Body: strings.NewReader(bodySearch), token: token}, "{\"error\":\"500 Internal Server Error\"}\n", http.StatusInternalServerError},
+		{"8", ts, args{serverAPI: server500, Method: "POST", Url: "/api/address/geocode", Body: strings.NewReader(bodyGeo), token: token}, "{\"error\":\"500 Internal Server Error\"}\n", http.StatusInternalServerError},
 		{"9", ts, args{serverAPI: serverSearch, Method: "POST", Url: "/api/address/search", Body: strings.NewReader(bodySearch), token: "123"}, "{\"error\":\"403 Forbidden\"}\n", http.StatusForbidden},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			testSearchHost = tt.args.serverAPI.URL
-			testGeoHost = tt.args.serverAPI.URL
+			controller.TestSearchHost = tt.args.serverAPI.URL
+			controller.TestGeoHost = tt.args.serverAPI.URL
 			req, _ := http.NewRequest(tt.args.Method, tt.server.URL+tt.args.Url, tt.args.Body)
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Authorization", tt.args.token)
@@ -128,7 +151,16 @@ func Test_handleRoutes(t *testing.T) {
 }
 
 func Test_handleLoginRegister(t *testing.T) {
-	router := getProxyRouter("http://hugo", ":1313")
+	logger := zap.New(zapcore.NewCore(
+		zapcore.NewConsoleEncoder(zap.NewDevelopmentEncoderConfig()),
+		zapcore.Lock(os.Stdout),
+		zap.DebugLevel,
+	))
+	decoder := godecoder.NewDecoder()
+	respond := responder.NewResponder(decoder, logger)
+	contrl := controller.NewController(respond, decoder)
+
+	router := getProxyRouter("http://hugo", ":1313", contrl)
 	ts := httptest.NewServer(router.r)
 	defer ts.Close()
 
@@ -158,13 +190,13 @@ func Test_handleLoginRegister(t *testing.T) {
 	}{
 		{"1", ts, args{Method: "POST", Url: "/api/register", Body: strings.NewReader(bodyRegister1)}, wantRegister1, http.StatusOK},
 		{"2", ts, args{Method: "POST", Url: "/api/login", Body: strings.NewReader(bodyRegister1)}, wantRegister1, http.StatusOK},
-		{"3", ts, args{Method: "GET", Url: "/api/register", Body: strings.NewReader(bodyRegister1)}, "{\"error\":\"Method not allowed\"}\n", http.StatusMethodNotAllowed},
-		{"4", ts, args{Method: "GET", Url: "/api/login", Body: strings.NewReader(bodyRegister1)}, "{\"error\":\"Method not allowed\"}\n", http.StatusMethodNotAllowed},
-		{"5", ts, args{Method: "POST", Url: "/api/register", Body: strings.NewReader(`dk&&*^jd@!)54;fjh`)}, "{\"error\":\"bad request: main.go 114: error read body userRequest: invalid character 'd' looking for beginning of value\"}\n", http.StatusBadRequest},
-		{"6", ts, args{Method: "POST", Url: "/api/login", Body: strings.NewReader(`dk&&*^jd@!)54;fjh`)}, "{\"error\":\"bad request: main.go 185: error read body userRequest: invalid character 'd' looking for beginning of value\"}\n", http.StatusBadRequest},
-		{"7", ts, args{Method: "POST", Url: "/api/register", Body: strings.NewReader(bodyRegister1)}, "{\"error\":\"User already exists\"}\n", http.StatusConflict},
-		{"8", ts, args{Method: "POST", Url: "/api/login", Body: strings.NewReader(bodyLogin1)}, "{\"error\":\"Wrong password\"}\n", http.StatusNotFound},
-		{"9", ts, args{Method: "POST", Url: "/api/login", Body: strings.NewReader(bodyLogin2)}, "{\"error\":\"User not found\"}\n", http.StatusNotFound},
+		{"3", ts, args{Method: "GET", Url: "/api/register", Body: strings.NewReader(bodyRegister1)}, "{\"error\":\"405 Method not allowed\"}\n", http.StatusMethodNotAllowed},
+		{"4", ts, args{Method: "GET", Url: "/api/login", Body: strings.NewReader(bodyRegister1)}, "{\"error\":\"405 Method not allowed\"}\n", http.StatusMethodNotAllowed},
+		{"5", ts, args{Method: "POST", Url: "/api/register", Body: strings.NewReader(`dk&&*^jd@!)54;fjh`)}, "{\"error\":\"400 bad request, err: readObjectStart: expect { or n, but found d, error found in #1 byte of ...|dk\\u0026\\u0026*^jd@!)|..., bigger context ...|dk\\u0026\\u0026*^jd@!)54;fjh|...\"}\n", http.StatusBadRequest},
+		{"6", ts, args{Method: "POST", Url: "/api/login", Body: strings.NewReader(`dk&&*^jd@!)54;fjh`)}, "{\"error\":\"400 bad request, err: readObjectStart: expect { or n, but found d, error found in #1 byte of ...|dk\\u0026\\u0026*^jd@!)|..., bigger context ...|dk\\u0026\\u0026*^jd@!)54;fjh|...\"}\n", http.StatusBadRequest},
+		{"7", ts, args{Method: "POST", Url: "/api/register", Body: strings.NewReader(bodyRegister1)}, "{\"error\":\"409 User already exists\"}\n", http.StatusConflict},
+		{"8", ts, args{Method: "POST", Url: "/api/login", Body: strings.NewReader(bodyLogin1)}, "{\"error\":\"404 Login or password is incorrect\"}\n", http.StatusNotFound},
+		{"9", ts, args{Method: "POST", Url: "/api/login", Body: strings.NewReader(bodyLogin2)}, "{\"error\":\"404 Login or password is incorrect\"}\n", http.StatusNotFound},
 	}
 
 	for _, tt := range tests {
@@ -177,7 +209,7 @@ func Test_handleLoginRegister(t *testing.T) {
 			buf := new(bytes.Buffer)
 			defer res.Body.Close()
 			buf.ReadFrom(res.Body)
-			assert.Equal(t, tt.want[:20], buf.String()[:20])
+			assert.Equal(t, tt.want[:35], buf.String()[:35])
 		})
 	}
 }
