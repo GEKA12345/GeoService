@@ -30,6 +30,7 @@ import (
 
 	"test/proxy/internal/controller"
 	"test/proxy/internal/responder"
+	"test/proxy/internal/service"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/jwtauth/v5"
@@ -45,7 +46,7 @@ type Router struct {
 }
 
 func init() {
-	controller.TokenAuth = jwtauth.New("HS256", []byte("salt_01"), nil)
+	service.TokenAuth = jwtauth.New("HS256", []byte("salt_01"), nil)
 }
 
 func (router *Router) handleRoutes() {
@@ -119,9 +120,9 @@ func (router *Router) handleRoutes() {
 	router.r.HandleFunc("/api/register", router.c.Register)
 
 	router.r.Group(func(r chi.Router) {
-		r.Use(jwtauth.Verifier(controller.TokenAuth))
+		r.Use(jwtauth.Verifier(service.TokenAuth))
 
-		r.Use(router.c.Authenticator(controller.TokenAuth))
+		r.Use(router.c.Authenticator(service.TokenAuth))
 
 		// swagger:operation POST /api/address/search search postSearch
 		//
@@ -208,6 +209,11 @@ func (router *Router) handleRoutes() {
 func main() {
 	host := "http://hugo"
 	port := ":1313"
+	r := getProxyRouter(host, port)
+	http.ListenAndServe(":8080", r.r)
+}
+
+func getProxyRouter(host, port string) *Router {
 	logger := zap.New(zapcore.NewCore(
 		zapcore.NewConsoleEncoder(zap.NewDevelopmentEncoderConfig()),
 		zapcore.Lock(os.Stdout),
@@ -215,13 +221,9 @@ func main() {
 	))
 	decoder := godecoder.NewDecoder()
 	respond := responder.NewResponder(decoder, logger)
-	contrl := controller.NewController(respond, decoder)
+	serv := service.NewGeoService(decoder)
+	contrl := controller.NewController(respond, decoder, serv)
 
-	r := getProxyRouter(host, port, contrl)
-	http.ListenAndServe(":8080", r.r)
-}
-
-func getProxyRouter(host, port string, contrl controller.Controllerer) *Router {
 	router := &Router{r: chi.NewRouter(), c: contrl}
 
 	router.r.Use(NewReverseProxy(host, port, contrl).ReverseProxy)

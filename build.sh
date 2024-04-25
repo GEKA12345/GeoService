@@ -1,4 +1,5 @@
 #!/bin/bash
+go test -cover ./...
 cd ./proxy
 go generate
 cd ../

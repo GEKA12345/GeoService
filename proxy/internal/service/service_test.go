@@ -1,60 +1,161 @@
-package main
+package service
 
 import (
-	"bytes"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
-	"test/proxy/internal/service"
-
-	"github.com/stretchr/testify/assert"
+	"github.com/go-chi/jwtauth/v5"
+	"github.com/ptflp/godecoder"
 )
 
-func Test_getProxyRouter(t *testing.T) {
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, "Hello, Hugo!")
-	})
+func TestGeoService_IsUserExist(t *testing.T) {
+	decoder := godecoder.NewDecoder()
+	serv := NewGeoService(decoder)
 
-	server := httptest.NewServer(handler)
-	defer server.Close()
-
-	router := getProxyRouter(server.URL, "")
-	ts := httptest.NewServer(router.r)
-	defer ts.Close()
-
-	tests := []struct {
-		name   string
-		server *httptest.Server
-		arg    string
-		want   string
-		status int
-	}{
-		{"1", ts, "", "Hello, Hugo!\n", http.StatusOK},
+	type args struct {
+		login string
 	}
-
+	tests := []struct {
+		name    string
+		service GeoServicer
+		args    args
+		want    bool
+	}{
+		{"1", serv, args{"User"}, false},
+	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			res, err := http.Get(tt.server.URL + tt.arg)
-			assert.NoError(t, err)
-			assert.Equal(t, tt.status, res.StatusCode)
-			buf := new(bytes.Buffer)
-			buf.ReadFrom(res.Body)
-			assert.Equal(t, tt.want, buf.String())
+			if got := tt.service.IsUserExist(tt.args.login); got != tt.want {
+				t.Errorf("GeoService.IsUserExist() = %v, want %v", got, tt.want)
+			}
 		})
 	}
 }
 
-func Test_handleRoutes(t *testing.T) {
-	service.TestEnabled = true
+func TestGeoService_Register(t *testing.T) {
+	decoder := godecoder.NewDecoder()
+	serv := NewGeoService(decoder)
+	TokenAuth = jwtauth.New("HS256", []byte("salt_01"), nil)
 
-	handlerSearch := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	type args struct {
+		login string
+		passw string
+	}
+	tests := []struct {
+		name    string
+		service GeoServicer
+		args    args
+		want    string
+	}{
+		{"1", serv, args{"User1", "qwerty"}, "User1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.service.Register(tt.args.login, tt.args.passw)
+			tok, _ := TokenAuth.Decode(got)
+			login, err := tok.Get("login")
+			if err != false {
+				fmt.Println("err get field login")
+			}
+			if login != tt.want {
+				t.Errorf("GeoService.Register() = %v, want %v", login, tt.want)
+			}
+		})
+	}
+}
+
+func TestGeoService_Login(t *testing.T) {
+	decoder := godecoder.NewDecoder()
+	serv := NewGeoService(decoder)
+	TokenAuth = jwtauth.New("HS256", []byte("salt_01"), nil)
+	serv.Register("User2", "qwerty")
+
+	type args struct {
+		login string
+		passw string
+	}
+	tests := []struct {
+		name    string
+		service GeoServicer
+		args    args
+		want    string
+		want1   bool
+	}{
+		{"1", serv, args{"User1", "qwerty"}, "", false},
+		{"2", serv, args{"User2", "qwerty1"}, "", false},
+		{"3", serv, args{"User2", "qwerty"}, "User2", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, got1 := tt.service.Login(tt.args.login, tt.args.passw)
+			if got1 != tt.want1 {
+				t.Errorf("GeoService.Login() got1 = %v, want %v", got1, tt.want1)
+			}
+			if got1 == true {
+				tok, _ := TokenAuth.Decode(got)
+				login, err := tok.Get("login")
+				if err != false {
+					fmt.Println("err get field login")
+				}
+				if login != tt.want {
+					t.Errorf("GeoService.Login() got = %v, want %v", login, tt.want)
+				}
+			}
+		})
+	}
+}
+
+func TestGeoService_GetSearchResp(t *testing.T) {
+	TestEnabled = true
+
+	handlerGeo := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintln(w, mockResSearch)
 	})
+
+	handler500 := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+
+	server500 := httptest.NewServer(handler500)
+	defer server500.Close()
+
+	serverGeo := httptest.NewServer(handlerGeo)
+	defer serverGeo.Close()
+
+	decoder := godecoder.NewDecoder()
+	serv := NewGeoService(decoder)
+
+	type args struct {
+		query string
+	}
+	tests := []struct {
+		name      string
+		service   GeoServicer
+		serverAPI *httptest.Server
+		args      args
+		wantErr   bool
+	}{
+		{"1", serv, serverGeo, args{"Ленинский проспект, 118к1, Санкт-Петербург"}, false},
+		{"2", serv, server500, args{"Ленинский проспект, 118к1, Санкт-Петербург"}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			TestSearchHost = tt.serverAPI.URL
+			_, err := tt.service.GetSearchResp(tt.args.query)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GeoService.GetSearchResp() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+		})
+	}
+}
+
+func TestGeoService_GetGeoResp(t *testing.T) {
+	TestEnabled = true
+
 	handlerGeo := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintln(w, mockResGeo)
@@ -67,118 +168,34 @@ func Test_handleRoutes(t *testing.T) {
 	server500 := httptest.NewServer(handler500)
 	defer server500.Close()
 
-	serverSearch := httptest.NewServer(handlerSearch)
-	defer serverSearch.Close()
 	serverGeo := httptest.NewServer(handlerGeo)
 	defer serverGeo.Close()
 
-	router := getProxyRouter("http://hugo", ":1313")
-	ts := httptest.NewServer(router.r)
-	defer ts.Close()
-
-	bodySearch := `{"query":"Ленинский проспект, 118к1, Санкт-Петербург"}`
-	bodyGeo := `{"lat":"59.93986890851519","lng":"30.26046752929688"}`
-
-	wantSearch := "{\"addresses\":[{\"address\":\"г Москва, ул Сухонская, д 11\",\"lat\":55.8782557,\"lon\":37.65372}]}\n"
-	wantGeo := "{\"addresses\":[{\"address\":\"г Москва, ул Сухонская, д 11\",\"lat\":55.878315,\"lon\":37.65372},{\"address\":\"г Москва, ул Сухонская, д 11А\",\"lat\":55.878212,\"lon\":37.652016},{\"address\":\"г Москва, ул Сухонская, д 13\",\"lat\":55.878666,\"lon\":37.6524},{\"address\":\"г Москва, ул Сухонская, д 9\",\"lat\":55.877167,\"lon\":37.652481},{\"address\":\"г Москва\",\"lat\":55.75396,\"lon\":37.620393}]}\n"
-
-	token := "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJsb2dpbiI6IlVzZXIxIiwicGFzc3dvcmQiOiIkMmEkMTAkaVUyaTQuTGdhdnEuZE9rdmtoZDZyZVY4QUVNbm1CLy5KWmJCOVpMZ2ZSYXVHY2ZnOHZWWmUifQ.h3iq4QISSdE1x4m7vVv9_U9fZukQagVlxvodMuwXaro"
+	decoder := godecoder.NewDecoder()
+	serv := NewGeoService(decoder)
 
 	type args struct {
+		lat string
+		lon string
+	}
+	tests := []struct {
+		name      string
+		service   GeoServicer
 		serverAPI *httptest.Server
-		Method    string
-		Url       string
-		Body      io.Reader
-		token     string
-	}
-
-	tests := []struct {
-		name       string
-		server     *httptest.Server
-		args       args
-		want       string
-		wantStatus int
+		args      args
+		wantErr   bool
 	}{
-		{"1", ts, args{serverAPI: serverSearch, Method: "POST", Url: "/api/address/search", Body: strings.NewReader(bodySearch), token: token}, wantSearch, http.StatusOK},
-		{"2", ts, args{serverAPI: serverGeo, Method: "POST", Url: "/api/address/geocode", Body: strings.NewReader(bodyGeo), token: token}, wantGeo, http.StatusOK},
-		{"3", ts, args{serverAPI: serverSearch, Method: "GET", Url: "/api/address/search", Body: strings.NewReader(bodySearch), token: token}, "{\"error\":\"405 Method not allowed\"}\n", http.StatusMethodNotAllowed},
-		{"4", ts, args{serverAPI: serverGeo, Method: "GET", Url: "/api/address/geocode", Body: strings.NewReader(bodyGeo), token: token}, "{\"error\":\"405 Method not allowed\"}\n", http.StatusMethodNotAllowed},
-		{"5", ts, args{serverAPI: serverSearch, Method: "POST", Url: "/api/address/search", Body: strings.NewReader(`dk&&*^jd@!)54;fjh`), token: token}, "{\"error\":\"400 bad request, err: readObjectStart: expect { or n, but found d, error found in #1 byte of ...|dk\\u0026\\u0026*^jd@!)|..., bigger context ...|dk\\u0026\\u0026*^jd@!)54;fjh|...\"}\n", http.StatusBadRequest},
-		{"6", ts, args{serverAPI: serverGeo, Method: "POST", Url: "/api/address/geocode", Body: strings.NewReader(`dk&&*^jd@!)54;fjh`), token: token}, "{\"error\":\"400 bad request, err: readObjectStart: expect { or n, but found d, error found in #1 byte of ...|dk\\u0026\\u0026*^jd@!)|..., bigger context ...|dk\\u0026\\u0026*^jd@!)54;fjh|...\"}\n", http.StatusBadRequest},
-		{"7", ts, args{serverAPI: server500, Method: "POST", Url: "/api/address/search", Body: strings.NewReader(bodySearch), token: token}, "{\"error\":\"500 Internal Server Error\"}\n", http.StatusInternalServerError},
-		{"8", ts, args{serverAPI: server500, Method: "POST", Url: "/api/address/geocode", Body: strings.NewReader(bodyGeo), token: token}, "{\"error\":\"500 Internal Server Error\"}\n", http.StatusInternalServerError},
-		{"9", ts, args{serverAPI: serverSearch, Method: "POST", Url: "/api/address/search", Body: strings.NewReader(bodySearch), token: "123"}, "{\"error\":\"403 Forbidden\"}\n", http.StatusForbidden},
+		{"1", serv, serverGeo, args{lat: "59.93986890851519", lon: "30.26046752929688"}, false},
+		{"2", serv, server500, args{lat: "59.93986890851519", lon: "30.26046752929688"}, true},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			service.TestSearchHost = tt.args.serverAPI.URL
-			service.TestGeoHost = tt.args.serverAPI.URL
-			req, _ := http.NewRequest(tt.args.Method, tt.server.URL+tt.args.Url, tt.args.Body)
-			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("Authorization", tt.args.token)
-			res, err := http.DefaultClient.Do(req)
-			assert.NoError(t, err)
-			assert.Equal(t, tt.wantStatus, res.StatusCode)
-			buf := new(bytes.Buffer)
-			defer res.Body.Close()
-			buf.ReadFrom(res.Body)
-			assert.Equal(t, tt.want, buf.String())
-		})
-	}
-}
-
-func Test_handleLoginRegister(t *testing.T) {
-	router := getProxyRouter("http://hugo", ":1313")
-	ts := httptest.NewServer(router.r)
-	defer ts.Close()
-
-	bodyRegister1 := `{"login":"User1", "password": "qwerty"}`
-	bodyLogin1 := `{"login":"User1", "password": "qwerty1"}`
-	bodyLogin2 := `{"login":"User2", "password": "qwerty1"}`
-
-	//pass, _ := bcrypt.GenerateFromPassword([]byte("qwerty"), 0)
-	//user := User{"login": "User1", "password": pass}
-	//_, tokenString, _ := tokenAuth.Encode(user)
-	//token := tokenResponse{"Bearer " + tokenString}
-	//tokenByte, _ := json.Marshal(token)
-	wantRegister1 := "{\"access_token\":\"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJsb2dpbiI6IlVzZXIxIiwicGFzc3dvcmQiOiIkMmEkMTAkaVUyaTQuTGdhdnEuZE9rdmtoZDZyZVY4QUVNbm1CLy5KWmJCOVpMZ2ZSYXVHY2ZnOHZWWmUifQ.h3iq4QISSdE1x4m7vVv9_U9fZukQagVlxvodMuwXaro\"}"
-
-	type args struct {
-		Method string
-		Url    string
-		Body   io.Reader
-	}
-
-	tests := []struct {
-		name       string
-		server     *httptest.Server
-		args       args
-		want       string
-		wantStatus int
-	}{
-		{"1", ts, args{Method: "POST", Url: "/api/register", Body: strings.NewReader(bodyRegister1)}, wantRegister1, http.StatusOK},
-		{"2", ts, args{Method: "POST", Url: "/api/login", Body: strings.NewReader(bodyRegister1)}, wantRegister1, http.StatusOK},
-		{"3", ts, args{Method: "GET", Url: "/api/register", Body: strings.NewReader(bodyRegister1)}, "{\"error\":\"405 Method not allowed\"}\n", http.StatusMethodNotAllowed},
-		{"4", ts, args{Method: "GET", Url: "/api/login", Body: strings.NewReader(bodyRegister1)}, "{\"error\":\"405 Method not allowed\"}\n", http.StatusMethodNotAllowed},
-		{"5", ts, args{Method: "POST", Url: "/api/register", Body: strings.NewReader(`dk&&*^jd@!)54;fjh`)}, "{\"error\":\"400 bad request, err: readObjectStart: expect { or n, but found d, error found in #1 byte of ...|dk\\u0026\\u0026*^jd@!)|..., bigger context ...|dk\\u0026\\u0026*^jd@!)54;fjh|...\"}\n", http.StatusBadRequest},
-		{"6", ts, args{Method: "POST", Url: "/api/login", Body: strings.NewReader(`dk&&*^jd@!)54;fjh`)}, "{\"error\":\"400 bad request, err: readObjectStart: expect { or n, but found d, error found in #1 byte of ...|dk\\u0026\\u0026*^jd@!)|..., bigger context ...|dk\\u0026\\u0026*^jd@!)54;fjh|...\"}\n", http.StatusBadRequest},
-		{"7", ts, args{Method: "POST", Url: "/api/register", Body: strings.NewReader(bodyRegister1)}, "{\"error\":\"409 User already exists\"}\n", http.StatusConflict},
-		{"8", ts, args{Method: "POST", Url: "/api/login", Body: strings.NewReader(bodyLogin1)}, "{\"error\":\"404 Login or password is incorrect\"}\n", http.StatusNotFound},
-		{"9", ts, args{Method: "POST", Url: "/api/login", Body: strings.NewReader(bodyLogin2)}, "{\"error\":\"404 Login or password is incorrect\"}\n", http.StatusNotFound},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			req, _ := http.NewRequest(tt.args.Method, tt.server.URL+tt.args.Url, tt.args.Body)
-			req.Header.Set("Content-Type", "application/json")
-			res, err := http.DefaultClient.Do(req)
-			assert.NoError(t, err)
-			assert.Equal(t, tt.wantStatus, res.StatusCode)
-			buf := new(bytes.Buffer)
-			defer res.Body.Close()
-			buf.ReadFrom(res.Body)
-			assert.Equal(t, tt.want[:35], buf.String()[:35])
+			TestGeoHost = tt.serverAPI.URL
+			_, err := tt.service.GetGeoResp(tt.args.lat, tt.args.lon)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GeoService.GetGeoResp() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
 		})
 	}
 }
